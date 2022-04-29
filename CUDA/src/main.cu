@@ -4,85 +4,79 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#define DIM 1000
+#define N (33 * 1024)
 
-struct cuComplex
+// In order to process even larger vector, each thread needs to process more than one element
+
+__global__ void add(int* a, int* b, int* c)
 {
-    float r;
-    float i;
-    // note: here we need to declare ctor as __device__ as well
-    __device__ cuComplex(float a, float b) : r(a), i(b) {}
-    __device__ float magnitude2(void)
-    {
-        return r * r + i * i;
-    }
-    __device__ cuComplex operator*(const cuComplex &a)
-    {
-        return cuComplex(r * a.r - i * a.i, i * a.r + r * a.i);
-    }
-    __device__ cuComplex operator+(const cuComplex &a)
-    {
-        return cuComplex(r + a.r, i + a.i);
-    }
-};
-
-__device__ int julia(int x, int y)
-{
-    const float scale = 1.5;
-    float jx = scale * (float)(DIM / 2 - x) / (DIM / 2);
-    float jy = scale * (float)(DIM / 2 - y) / (DIM / 2);
-
-    cuComplex c(-0.8, 0.156);
-    cuComplex a(jx, jy);
-
-    int i = 0;
-    for (i = 0; i < 200; i++)
-    {
-        a = a * a + c;
-        if (a.magnitude2() > 1000)
-            return 0;
-    }
-
-    return 1;
-}
-
-__global__ void kernel(unsigned char *ptr)
-{
-    // Note: unlike in CPU version, we don't have for loop to generate pixel indices anymore/
-    // in GPU, we compute pixel indices through blockIdx
-
-    // map from blockIdx to pixel position
-    // (x,y) ranges from (0, 0) and (DIM - 1, DIM - 1)
-    int x = blockIdx.x;
-    int y = blockIdx.y;
-    // offset ranges from 0 to (DIM * DIM - 1)
-    int offset = x + y * gridDim.x;
-
-    // now calculate the value at that position
-    int juliaValue = julia(x, y);
-    ptr[offset * 4 + 0] = 255 * juliaValue;
-    ptr[offset * 4 + 1] = 0;
-    ptr[offset * 4 + 2] = 0;
-    ptr[offset * 4 + 3] = 255;
+	// each parallel thread needs to start on a different data index
+	int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	while (tid < N)
+	{
+		c[tid] = a[tid] + b[tid];
+		// each thread increments their indices by the total number of threads to ensure we don't miss any elements and don't add a pair twice
+		tid += blockDim.x * gridDim.x;
+	}
 }
 
 int main(void)
 {
-    CPUBitmap bitmap(DIM, DIM);
-    // declare a pointer to hold a copy of the data on the device
-    unsigned char *dev_bitmap;
+	int *a, *b, *c;
+	int *dev_a, *dev_b, *dev_c;
 
-    HANDLE_ERROR(cudaMalloc((void **)&dev_bitmap, bitmap.image_size()));
+	// allocate the memory on the CPU
+	a = (int*)malloc(N * sizeof(int));
+	b = (int*)malloc(N * sizeof(int));
+	c = (int*)malloc(N * sizeof(int));
 
-    // specify 2D grid of blocks because our problem is 2D
-    dim3 grid(DIM, DIM);
-    kernel<<<grid, 1>>>(dev_bitmap);
+	// allocate the memory on the GPU
+	HANDLE_ERROR(cudaMalloc((void**)&dev_a, N * sizeof(int)));
+	HANDLE_ERROR(cudaMalloc((void**)&dev_b, N * sizeof(int)));
+	HANDLE_ERROR(cudaMalloc((void**)&dev_c, N * sizeof(int)));
 
-    HANDLE_ERROR(cudaMemcpy(bitmap.get_ptr(), dev_bitmap,
-                            bitmap.image_size(),
-                            cudaMemcpyDeviceToHost));
+	// fill the arrays 'a' and 'b' on the CPU
+	for (int i = 0; i < N; i++)
+	{
+		a[i] = i;
+		b[i] = 2 * i;
+	}
 
-    HANDLE_ERROR(cudaFree(dev_bitmap));
+	// copy the arrays 'a' and 'b' to the GPU
+	HANDLE_ERROR(cudaMemcpy(dev_a, a, N * sizeof(int),
+		cudaMemcpyHostToDevice));
+	HANDLE_ERROR(cudaMemcpy(dev_b, b, N * sizeof(int),
+		cudaMemcpyHostToDevice));
 
-    bitmap.display_and_exit();
+	// to ensure that we never lanuch too many blocks/threads, 
+	// we will fix the number of blocks and blocks to some reasonable small value
+	add<<<128, 128>>>(dev_a, dev_b, dev_c);
+
+	// copy the array 'c' back from the GPU to the CPU
+	HANDLE_ERROR(cudaMemcpy(c, dev_c, N * sizeof(int),
+		cudaMemcpyDeviceToHost));
+
+	// verify that the GPU did the work we requested
+	bool success = true;
+	for (int i = 0; i < N; i++)
+	{
+		if ((a[i] + b[i]) != c[i])
+		{
+			printf("Error:  %d + %d != %d\n", a[i], b[i], c[i]);
+			success = false;
+		}
+	}
+	if (success) printf("We did it!\n");
+
+	// free the memory we allocated on the GPU
+	HANDLE_ERROR(cudaFree(dev_a));
+	HANDLE_ERROR(cudaFree(dev_b));
+	HANDLE_ERROR(cudaFree(dev_c));
+
+	// free the memory we allocated on the CPU
+	free(a);
+	free(b);
+	free(c);
+
+	return 0;
 }

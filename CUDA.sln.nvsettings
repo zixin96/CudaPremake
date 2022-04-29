@@ -1,0 +1,2 @@
+[WarpWatch]
+Expressions=tid, blockDim.x, gridDim.x
