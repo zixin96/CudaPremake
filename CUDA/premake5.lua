@@ -10,6 +10,8 @@ project "CUDA"
 	{
 		"src/**.h",
 		"src/**.cpp",
+		"common/**.h",
+		"common/**.cpp"
 	}
 
 	libdirs
@@ -31,7 +33,10 @@ project "CUDA"
     buildcustomizations "BuildCustomizations/CUDA 11.6"
 	
     -- CUDA specific properties
-    cudaFiles {"CUDA/src/**.cu"} -- files NVCC compiles (Note path starts from the root)
+    cudaFiles 
+	{
+		"CUDA/src/**.cu"
+	} -- files NVCC compiles (Note path starts from the root)
     cudaMaxRegCount "32"
 
     -- Let's compile for all supported architectures (and also in parallel with -t0)

@@ -1,2 +1,2 @@
 [WarpWatch]
-Expressions=tid, blockDim.x, gridDim.x
+Expressions=tid, x, y

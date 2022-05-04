@@ -22,6 +22,7 @@
 #include "cuda.h"
 #include "cuda_gl_interop.h"
 #include <iostream>
+#include "book.h"
 
 
 PFNGLBINDBUFFERARBPROC    glBindBuffer     = NULL;
